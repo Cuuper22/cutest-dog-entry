@@ -1,6 +1,7 @@
-"""Cutest dog: a chibi puppy drawn with signed-distance shapes, written as a PNG.
+"""Cutest dog: a fluffy puppy waving at a butterfly in a sunny meadow.
 
-Standard library only. Deterministic: no randomness, no timestamps.
+Drawn with signed-distance shapes and written as a PNG. Standard library only.
+Deterministic: no randomness, no timestamps.
 Writes $MAKEFUN_OUTPUT_DIR/entry.png (default /output/entry.png).
 """
 import math
@@ -165,6 +166,30 @@ def intersect(a, b):
                  min(a[1][2], b[1][2]), min(a[1][3], b[1][3]))
 
 
+def fluffy(shape, cx, cy, n, amp, lo=-1.0, hi=1.0, phase=0.0):
+    """Scallop a shape's edge into rounded fur bumps.
+
+    Bumps follow the angle around (cx, cy); they are applied where the
+    downward component sin(theta) lies between lo and hi (soft edges).
+    """
+    f = shape[0]
+
+    def sdf(x, y):
+        d = f(x, y)
+        if d > amp + 2.0 or d < -amp - 2.0:
+            return d
+        dx, dy = x - cx, y - cy
+        r = math.sqrt(dx * dx + dy * dy) or 1e-9
+        s = dy / r
+        w = smoothstep(lo - 0.15, lo + 0.15, s) * (1.0 - smoothstep(hi - 0.15, hi + 0.15, s))
+        if w <= 0.0:
+            return d
+        th = math.atan2(dy, dx)
+        return d - amp * w * abs(math.cos(n * th * 0.5 + phase))
+    x0, y0, x1, y1 = shape[1]
+    return sdf, (x0 - amp, y0 - amp, x1 + amp, y1 + amp)
+
+
 # ---------------------------------------------------------------- canvas
 class Canvas:
     def __init__(self, n):
@@ -277,132 +302,213 @@ class Canvas:
 
 
 # ---------------------------------------------------------------- palette
-INK = hexc('4a2e22')
-FUR = hexc('f2b67a')
-FUR_HI = hexc('fcd3a1')
-FUR_SH = hexc('d8935a')
-EAR = hexc('b9733f')
-EAR_SH = hexc('94592d')
-CREAM = hexc('fff4e4')
-CREAM_SH = hexc('f0d9bf')
-EYE = hexc('2b1a14')
-NOSE = hexc('2f1d17')
+INK = hexc('7a4a32')        # warm brown outline
+FUR = hexc('f4b97c')
+FUR_HI = hexc('fdd9ab')
+FUR_SH = hexc('d99560')
+EAR = hexc('c07a45')
+EAR_SH = hexc('9a5d33')
+CREAM = hexc('fff6e8')
+CREAM_SH = hexc('f1dcc2')
+EYE = hexc('2a1812')
+IRIS = hexc('7e4a2f')
+PUPIL = hexc('1a0d08')
+NOSE = hexc('3a241b')
 TONGUE = hexc('ff8a9a')
+PAD = hexc('f7a3ad')
 BLUSH = hexc('ff8fa0')
-BG_IN = hexc('eef8fd')
-BG_OUT = hexc('b9def2')
+BROW = hexc('a3653d')
 COLLAR = hexc('e8475a')
 GOLD = hexc('ffc93c')
-HEART = hexc('ff8fa8')
+SKY_TOP = hexc('bfe2f6')
+SKY_LOW = hexc('fff4df')
+SUN = hexc('fffbea')
+HILL_FAR = hexc('d3ebb4')
+HILL_NEAR = hexc('b4dc93')
+GRASS = hexc('8cc66e')
+WING = hexc('ffb6d2')
+WING_HI = hexc('fff0f6')
+WING_SH = hexc('f08cb6')
 
 
 def draw():
     cv = Canvas(SIZE)
 
+    # ---- sunlit meadow background
     def bg(x, y):
-        t = math.sqrt((x - 256) ** 2 + (y - 220) ** 2) / 380.0
-        return mix(BG_IN, BG_OUT, smoothstep(0.05, 1.0, t))
+        t = clamp01((y + 20) / 380.0)
+        col = mix(SKY_TOP, SKY_LOW, t * t)
+        g = math.sqrt((x - 70) ** 2 + (y - 40) ** 2) / 260.0
+        col = mix(SUN, col, smoothstep(0.0, 1.0, g))
+        far = 352 + 14 * math.sin(x / 70.0 + 1.0)
+        if y > far - 2:
+            col = mix(col, mix(HILL_FAR, HILL_NEAR, clamp01((y - far) / 120.0)),
+                      smoothstep(far - 2, far + 2, y))
+        near = 392 + 10 * math.sin(x / 55.0 + 3.0) + 0.0004 * (x - 256) ** 2
+        if y > near - 2:
+            col = mix(col, mix(HILL_NEAR, GRASS, clamp01((y - near) / 140.0)),
+                      smoothstep(near - 2, near + 2, y))
+        return col
     cv.background(bg)
 
-    # ground shadow
-    cv.paint(ellipse(256, 452, 185, 20), hexc('8fb9d3'), alpha=0.45, soft=10)
+    # bokeh dots in the sky (fixed positions)
+    for bx, by, br, a in ((60, 120, 14, 0.35), (110, 60, 8, 0.45), (440, 70, 16, 0.3),
+                          (470, 250, 9, 0.4), (40, 260, 10, 0.35), (380, 30, 6, 0.5),
+                          (25, 190, 5, 0.5), (490, 140, 6, 0.45)):
+        cv.paint(ellipse(bx, by, br, br), (255, 255, 255), alpha=a, soft=br * 0.35)
 
-    # two little floating hearts
-    cv.paint(heart(420, 118, 34, ang=math.radians(14)), HEART, outline=hexc('d95c78'), ow=2.2,
-             light=(414, 112, 14, hexc('ffc4d2')))
-    cv.paint(heart(452, 172, 20, ang=math.radians(-10)), HEART, alpha=0.75)
+    # tiny meadow flowers, kept to the sides
+    def daisy(fx, fy, r, petal=(255, 255, 255), centre=hexc('ffd34d')):
+        for k in range(6):
+            ang = k * math.pi / 3
+            cv.paint(ellipse(fx + math.cos(ang) * r * 0.9, fy + math.sin(ang) * r * 0.9,
+                             r * 0.62, r * 0.38, ang), petal)
+        cv.paint(ellipse(fx, fy, r * 0.45, r * 0.45), centre)
+    daisy(40, 428, 8)
+    daisy(88, 446, 9, petal=hexc('ffd0de'))
+    daisy(458, 418, 9)
+    daisy(430, 470, 8, petal=hexc('ffd0de'))
+    daisy(30, 470, 7)
+    daisy(486, 372, 6)
 
-    ow = 3.0
-    # tail (behind body), a happy upward curl
-    tail = union([stroke(bezier((320, 415), (392, 410), (382, 345), 20), 15),
-                  ellipse(380, 342, 17, 19)], k=10)
-    cv.paint(tail, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=8,
-             light=(372, 360, 30, FUR_HI))
+    # soft ground shadow
+    cv.paint(ellipse(256, 452, 165, 20), hexc('6fa45a'), alpha=0.35, soft=12)
 
-    # body with haunches
+    ow = 2.6
+    # ---- tail (behind body), a happy upward curl with a cream tip
+    # a tapered, wagging tail: circles shrinking along a curve
+    path = bezier((196, 420), (118, 428), (96, 372), 14)
+    tail = union([ellipse(x, y, 14 - 8 * k / 14, 14 - 8 * k / 14)
+                  for k, (x, y) in enumerate(path)], k=6)
+    cv.paint(tail, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=6,
+             light=(120, 405, 30, FUR_HI))
+    cv.paint(stroke(bezier((76, 384), (68, 372), (72, 358)), 1.6), INK, alpha=0.6)
+    cv.paint(stroke(bezier((66, 396), (54, 380), (60, 362)), 1.6), INK, alpha=0.45)
+
+    # ---- body with haunches
     body = union([ellipse(256, 372, 94, 82),
                   ellipse(186, 410, 50, 40), ellipse(326, 410, 50, 40)], k=22)
     cv.paint(body, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=14,
              light=(236, 350, 110, FUR_HI))
-    chest = intersect(ellipse(256, 360, 58, 64), body)
-    cv.paint(chest, CREAM, shade=CREAM_SH, rim=8)
+    # fluffy cream chest tuft
+    chest = fluffy(ellipse(256, 356, 56, 62), 256, 356, 10, 6.0, lo=0.2, hi=1.0)
+    cv.paint(intersect(chest, body), CREAM, shade=CREAM_SH, rim=7)
+    # soft shadow under the chin
+    cv.paint(ellipse(256, 312, 90, 22), FUR_SH, alpha=0.35, soft=12)
 
-    # back feet: separate outlined paws turned outwards
+    # ---- back feet with cream toes
     for side in (-1, 1):
         fx = 256 + side * 100
         foot = ellipse(fx, 440, 34, 18, ang=side * math.radians(8))
         cv.paint(foot, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=7,
                  light=(fx - 6, 434, 26, FUR_HI))
-        for tx in (-8, 8):
-            cv.paint(stroke([(fx + side * 14 + tx, 446), (fx + side * 14 + tx, 455)], 1.5), INK)
+        cv.paint(intersect(ellipse(fx + side * 14, 446, 24, 13), foot), CREAM, soft=1.0)
+        for tx in (-7, 7):
+            cv.paint(stroke([(fx + side * 16 + tx, 447), (fx + side * 16 + tx, 455)], 1.3), INK)
+        # re-draw outline over the cream patch
+        ring = intersect(foot, (lambda x, y, f=foot[0]: -f(x, y) - ow, foot[1]))
+        cv.paint(ring, INK)
 
-    # red collar with a gold heart tag
+    # ---- red collar with a gold heart tag
     collar = intersect(stroke(bezier((180, 296), (256, 330), (332, 296)), 8), body)
-    cv.paint(collar, COLLAR, outline=hexc('a8283a'), ow=1.6)
-    ring = ellipse(257, 323, 5.5, 5.5)
-    cv.paint(ring, GOLD, outline=hexc('b8862a'), ow=1.6)
+    cv.paint(collar, COLLAR, outline=hexc('b02c40'), ow=1.4)
+    cv.paint(ellipse(257, 323, 5.5, 5.5), GOLD, outline=hexc('b8862a'), ow=1.4)
     cv.paint(ellipse(257, 323, 2.4, 2.4), COLLAR)
-    tag = heart(258, 336, 24, ang=math.radians(-6))
-    cv.paint(tag, GOLD, outline=hexc('b8862a'), ow=1.8, light=(252, 331, 9, hexc('fff2b8')))
+    tag = heart(258, 336, 22, ang=math.radians(-6))
+    cv.paint(tag, GOLD, outline=hexc('b8862a'), ow=1.6, light=(252, 331, 9, hexc('fff2b8')))
 
-    # stubby front legs + round paws
-    for lx in (227, 285):
-        leg = union([stroke([(lx, 396), (lx, 426)], 25),
-                     ellipse(lx, 437, 32, 22)], k=14)
-        cv.paint(leg, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=8,
-                 light=(lx - 8, 405, 45, FUR_HI))
-        for tx in (-9, 9):
-            cv.paint(stroke([(lx + tx, 446), (lx + tx, 455)], 1.5), INK)
+    # ---- planted front leg (viewer's left)
+    lx = 228
+    leg = union([stroke([(lx, 396), (lx, 426)], 25), ellipse(lx, 437, 32, 22)], k=14)
+    cv.paint(leg, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=8,
+             light=(lx - 8, 405, 45, FUR_HI))
+    cv.paint(intersect(ellipse(lx, 448, 30, 14), leg), CREAM, soft=1.0)
+    ring = intersect(leg, (lambda x, y, f=leg[0]: -f(x, y) - ow, leg[1]))
+    cv.paint(ring, INK)
+    for tx in (-9, 9):
+        cv.paint(stroke([(lx + tx, 446), (lx + tx, 455)], 1.3), INK)
 
-    # tennis-ball toy
-    ball = ellipse(94, 436, 26, 26)
-    cv.paint(ball, hexc('d6ea6a'), outline=INK, ow=ow, shade=hexc('a9c446'), rim=9,
-             light=(85, 425, 23, hexc('f3fbb8')))
-    for seam in (bezier((70, 420), (92, 436), (76, 458)), bezier((118, 414), (96, 436), (112, 458))):
-        cv.paint(intersect(stroke(seam, 2.2), ball), (255, 255, 250))
-
-    # ---- head (tilted)
+    # ---- head (tilted towards the butterfly)
     cv.set_rotation(math.radians(-11), 256, 300)
     for side in (-1, 1):
-        ear = ellipse(256 + side * 128, 205, 42, 84, ang=side * math.radians(-16))
+        ex = 256 + side * 128
+        ear = ellipse(ex, 205, 42, 84, ang=side * math.radians(-16))
+        ear = fluffy(ear, ex, 205, 9, 4.0, lo=0.55, hi=1.0)
         cv.paint(ear, EAR, outline=INK, ow=ow, shade=EAR_SH, rim=12,
-                 light=(256 + side * 125, 190, 40, hexc('c98450')))
+                 light=(ex - side * 3, 185, 45, hexc('d48d56')))
     head = union([ellipse(256, 190, 134, 110),
                   ellipse(180, 236, 72, 56), ellipse(332, 236, 72, 56)], k=36)
+    head = fluffy(head, 256, 210, 22, 5.5, lo=0.25, hi=1.0)
     tuft = union([ellipse(238, 86, 15, 14), ellipse(258, 78, 16, 15),
                   ellipse(278, 86, 14, 13)], k=4)
     head = union([head, tuft], k=6)
     cv.paint(head, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=15,
              light=(222, 140, 150, FUR_HI))
-    muzzle = ellipse(256, 270, 46, 32)
-    cv.paint(muzzle, CREAM, shade=CREAM_SH, rim=6, soft=1.5)
+    muzzle = union([ellipse(256, 272, 50, 34), ellipse(256, 246, 26, 22)], k=14)
+    cv.paint(muzzle, CREAM, shade=CREAM_SH, rim=6, soft=2.0)
 
-    # soft "puppy-dog" brow spots, raised towards the middle
-    for side in (-1, 1):
-        cv.paint(ellipse(256 + side * 50, 175, 10.5, 6.5, ang=side * math.radians(-18)),
-                 FUR_SH, alpha=0.8, soft=2.0)
+    # small sweet eyebrows, inner ends raised
+    cv.paint(stroke(bezier((190, 168), (198, 161), (208, 160), 8), 4.0), BROW)
+    cv.paint(stroke(bezier((304, 160), (314, 161), (322, 168), 8), 4.0), BROW)
 
-    # eyes: big, low, glossy
-    for ex in (200, 312):
+    # eyes: big, deep, layered highlights
+    for ex in (198, 314):
         ey = 222
-        cv.paint(ellipse(ex, ey, 29, 33), EYE, light=(ex, ey + 24, 32, hexc('7d4a32')))
-        cv.paint(ellipse(ex - 10, ey - 13, 10.5, 11.5), (255, 255, 255))
-        cv.paint(ellipse(ex + 11, ey + 13, 5, 5), (255, 255, 255))
-        cv.paint(ellipse(ex + 3, ey - 21, 2.8, 2.8), (255, 255, 255), alpha=0.9)
+        eye = ellipse(ex, ey, 31, 35)
+        cv.paint(eye, EYE)
+        cv.paint(ellipse(ex, ey + 5, 25, 28), IRIS, light=(ex, ey + 28, 24, hexc('b9774a')), soft=1.5)
+        cv.paint(ellipse(ex, ey + 1, 16, 18), PUPIL, soft=1.5)
+        lid = intersect(stroke(bezier((ex - 14, ey + 25), (ex, ey + 35), (ex + 14, ey + 25)), 1.8), eye)
+        cv.paint(lid, (255, 214, 170), alpha=0.65, soft=1.0)
+        cv.paint(ellipse(ex - 11, ey - 14, 11.5, 12.5), (255, 255, 255))
+        cv.paint(ellipse(ex + 12, ey + 12, 5.5, 5.5), (255, 255, 255))
+        cv.paint(ellipse(ex + 4, ey - 24, 3, 3), (255, 255, 255), alpha=0.9)
+        cv.paint(ellipse(ex - 4, ey + 22, 2.4, 2.4), (255, 255, 255), alpha=0.8)
 
     # cheeks
-    for bx in (162, 350):
-        cv.paint(ellipse(bx, 262, 24, 13), BLUSH, alpha=0.55, soft=5)
+    for bx in (160, 352):
+        cv.paint(ellipse(bx, 264, 24, 13), BLUSH, alpha=0.5, soft=6)
 
     # tongue, nose, mouth
-    cv.paint(ellipse(256, 290, 11, 14), TONGUE, outline=INK, ow=2.2)
-    cv.paint(stroke([(256, 284), (256, 294)], 0.9), hexc('d9607a'))
-    cv.paint(ellipse(256, 257, 16, 11), NOSE)
+    cv.paint(ellipse(256, 291, 11, 14), TONGUE, outline=INK, ow=2.0)
+    cv.paint(stroke([(256, 285), (256, 295)], 0.9), hexc('d9607a'))
+    cv.paint(ellipse(256, 257, 16, 11), NOSE, light=(256, 262, 14, hexc('5a3a2c')))
     cv.paint(ellipse(250, 252, 5, 3), (255, 255, 255), alpha=0.85)
-    cv.paint(stroke([(256, 266), (256, 275)], 1.6), INK)
-    cv.paint(stroke(bezier((236, 275), (246, 285), (256, 275)), 1.6), INK)
-    cv.paint(stroke(bezier((256, 275), (266, 285), (276, 275)), 1.6), INK)
+    cv.paint(stroke([(256, 266), (256, 275)], 1.5), INK)
+    cv.paint(stroke(bezier((236, 275), (246, 285), (256, 275)), 1.5), INK)
+    cv.paint(stroke(bezier((256, 275), (266, 285), (276, 275)), 1.5), INK)
     cv.set_rotation(0, 0, 0)
+
+    # ---- raised front paw, waving, toe beans showing
+    px, py = 366, 314
+    arm = union([stroke(bezier((316, 368), (346, 360), (px - 2, py + 16)), 22),
+                 ellipse(px, py, 29, 27, ang=math.radians(-20))], k=12)
+    arm = fluffy(arm, px, py, 8, 2.5, lo=-1.0, hi=-0.3)
+    cv.paint(arm, FUR, outline=INK, ow=ow, shade=FUR_SH, rim=9,
+             light=(px - 10, py + 10, 40, FUR_HI))
+    cv.paint(ellipse(px + 1, py + 6, 12, 10, ang=math.radians(-20)), PAD)
+    for bx, by in ((-14, -9), (0, -15), (14, -9)):
+        cv.paint(ellipse(px + bx, py + by, 5.5, 6.5, ang=math.radians(bx * 1.5)), PAD)
+    # little wave marks
+    cv.paint(stroke(bezier((px + 36, py - 30), (px + 46, py - 16), (px + 40, py)), 1.8), INK, alpha=0.7)
+    cv.paint(stroke(bezier((px + 46, py - 40), (px + 60, py - 18), (px + 52, py + 4)), 1.8), INK, alpha=0.5)
+
+    # a little heart of delight between puppy and butterfly
+    cv.paint(heart(450, 256, 22, ang=math.radians(12)), hexc('ff7f9c'),
+             outline=hexc('d95c78'), ow=1.6, light=(445, 251, 8, hexc('ffd0dc')))
+
+    # ---- butterfly visiting
+    bx, by = 446, 196
+    for side in (-1, 1):
+        up = ellipse(bx + side * 13, by - 9, 14, 17, ang=side * math.radians(-35))
+        lo = ellipse(bx + side * 10, by + 10, 9, 11, ang=side * math.radians(30))
+        cv.paint(up, WING, outline=hexc('c45a8a'), ow=1.6, light=(bx + side * 10, by - 6, 14, WING_HI))
+        cv.paint(lo, WING_SH, outline=hexc('c45a8a'), ow=1.6, light=(bx + side * 8, by + 8, 9, WING))
+        cv.paint(ellipse(bx + side * 15, by - 12, 4, 4), hexc('fff6a8'))
+        cv.paint(stroke(bezier((bx, by - 12), (bx + side * 4, by - 26), (bx + side * 12, by - 30)), 0.9),
+                 hexc('6b3f2f'))
+        cv.paint(ellipse(bx + side * 12, by - 30, 2.2, 2.2), hexc('6b3f2f'))
+    cv.paint(ellipse(bx, by, 3.2, 13), hexc('6b3f2f'))
 
     return cv.png()
 
